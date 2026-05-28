@@ -6,7 +6,7 @@ router.post('/register', userRegister)
 
 router.post('/login', loginUser)
 
-//router.post('/login', logoutUser)
+//router.post('/login', logoutUser) test
 
 //router.get('/refresh', handleRefreshToken)
 
