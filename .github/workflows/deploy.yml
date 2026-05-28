@@ -70,7 +70,7 @@ jobs:
               --name ecommerce-app \
               --restart unless-stopped \
               -p 5000:5000 \
-              -e MONGODB_URI="mongodb://localhost:27017/ecommerce" \
+              -e MONGODB_URI="mongodb://172.17.0.1:27017/ecommerce" \
               -e PASSWORD_KEY="${{ secrets.PASSWORD_KEY }}" \
               -e JWT_KEY="${{ secrets.JWT_KEY }}" \
               -e NODE_ENV=production \
