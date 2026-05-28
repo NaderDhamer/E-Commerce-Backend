@@ -1,0 +1,79 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO: ecommerce-backend
+  CONTAINER_NAME: ecommerce-app
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          docker tag "$IMAGE_URI" "$ECR_REGISTRY/$ECR_REPO:latest"
+          docker push "$ECR_REGISTRY/$ECR_REPO:latest"
+          echo "image=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host:     ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          envs:     AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,AWS_SESSION_TOKEN
+          script: |
+            aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"
+            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+            aws configure set aws_session_token     "$AWS_SESSION_TOKEN"
+            aws configure set region                "us-east-1"
+
+            ECR_REGISTRY="636449817691.dkr.ecr.us-east-1.amazonaws.com"
+            IMAGE="${{ steps.build.outputs.image }}"
+
+            aws ecr get-login-password --region us-east-1 \
+              | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+            docker stop ecommerce-app 2>/dev/null || true
+            docker rm   ecommerce-app 2>/dev/null || true
+
+            docker pull "$IMAGE"
+
+            docker run -d \
+              --name ecommerce-app \
+              --restart unless-stopped \
+              -p 5000:5000 \
+              -e MONGODB_URI="mongodb://localhost:27017/ecommerce" \
+              -e PASSWORD_KEY="${{ secrets.PASSWORD_KEY }}" \
+              -e JWT_KEY="${{ secrets.JWT_KEY }}" \
+              -e NODE_ENV=production \
+              "$IMAGE"
+
+            docker image prune -f
